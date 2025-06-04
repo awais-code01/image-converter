@@ -6,48 +6,92 @@
   <title>Universal Image Converter</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(to right, #ffecd2, #fcb69f);
       display: flex;
       flex-direction: column;
       align-items: center;
       padding: 20px;
+      color: #333;
+    }
+    h2 {
+      color: #ff6600;
     }
     .drop-zone {
-      border: 2px dashed #ccc;
+      border: 2px dashed #999;
       padding: 30px;
       text-align: center;
       cursor: pointer;
       margin-bottom: 20px;
       width: 100%;
       max-width: 500px;
+      background: #fff8f0;
+      border-radius: 10px;
     }
     .drop-zone.hover {
-      background-color: #f0f0f0;
+      background-color: #fff0e0;
     }
-    img {
-      max-width: 100%;
-      margin-top: 10px;
+    .controls, .images-preview {
+      width: 100%;
+      max-width: 600px;
+      margin: 10px auto;
     }
     .controls {
-      margin: 10px 0;
       display: flex;
       flex-direction: column;
+      gap: 10px;
+    }
+    .progress-container {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .progress {
       width: 100%;
-      max-width: 500px;
+      background-color: #ddd;
+      height: 10px;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background-color: #ff6600;
+    }
+    .preview-box {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
     }
     @media (min-width: 600px) {
       .controls {
         flex-direction: row;
         justify-content: space-between;
+        flex-wrap: wrap;
       }
+    }
+    img {
+      max-width: 100%;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+    button {
+      background-color: #ff6600;
+      color: white;
+      padding: 10px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #e65c00;
     }
   </style>
 </head>
 <body>
   <h2>Universal Image Converter</h2>
-
-  <div class="drop-zone" id="dropZone">Drop image here or click to upload</div>
-  <input type="file" id="fileInput" accept="image/*" style="display:none" />
+  <div class="drop-zone" id="dropZone">Drop images here or click to upload</div>
+  <input type="file" id="fileInput" accept="image/*" multiple style="display:none" />
 
   <div class="controls">
     <label>
@@ -59,36 +103,38 @@
         <option value="image/bmp">BMP</option>
         <option value="image/gif">GIF</option>
         <option value="image/avif">AVIF</option>
+        <option value="image/heic">HEIC</option>
       </select>
     </label>
     <label>
       Quality:
       <input type="range" id="qualityRange" min="0.1" max="1" step="0.1" value="0.9">
     </label>
-    <button id="convertBtn">Convert & Download</button>
+    <button id="convertBtn">Convert & Download ZIP</button>
   </div>
 
-  <div>
-    <h4>Original Preview:</h4>
-    <img id="originalPreview" />
-    <h4>Converted Preview:</h4>
-    <img id="convertedPreview" />
+  <div class="progress-container">
+    <div>Progress: <span id="progressText">0%</span></div>
+    <div class="progress"><div id="progressBar" class="progress-bar"></div></div>
   </div>
 
-  <!-- Libraries -->
+  <div class="images-preview" id="imagesPreview"></div>
+
   <script src="https://unpkg.com/heic2any"></script>
   <script src="https://cdn.jsdelivr.net/npm/tiff@latest/dist/tiff.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
   <script>
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
-    const originalPreview = document.getElementById('originalPreview');
-    const convertedPreview = document.getElementById('convertedPreview');
     const formatSelect = document.getElementById('formatSelect');
     const qualityRange = document.getElementById('qualityRange');
     const convertBtn = document.getElementById('convertBtn');
+    const imagesPreview = document.getElementById('imagesPreview');
+    const progressText = document.getElementById('progressText');
+    const progressBar = document.getElementById('progressBar');
 
-    let selectedFile = null;
+    let selectedFiles = [];
 
     dropZone.addEventListener('click', () => fileInput.click());
     dropZone.addEventListener('dragover', e => {
@@ -99,59 +145,78 @@
     dropZone.addEventListener('drop', e => {
       e.preventDefault();
       dropZone.classList.remove('hover');
-      handleFile(e.dataTransfer.files[0]);
+      handleFiles(e.dataTransfer.files);
     });
-    fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
+    fileInput.addEventListener('change', () => handleFiles(fileInput.files));
 
-    function handleFile(file) {
-      selectedFile = file;
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const buffer = reader.result;
-        if (file.type === 'image/heic') {
-          const blob = await heic2any({ blob: file, toType: 'image/jpeg' });
-          selectedFile = new File([blob], file.name.replace(/\.heic$/, '.jpg'), { type: 'image/jpeg' });
-          originalPreview.src = URL.createObjectURL(blob);
-        } else if (file.type === 'image/tiff') {
-          const tiff = new Tiff({ buffer });
-          const canvas = tiff.toCanvas();
-          originalPreview.src = canvas.toDataURL('image/png');
-          canvas.toBlob(blob => {
-            selectedFile = new File([blob], file.name.replace(/\.tiff$/, '.png'), { type: 'image/png' });
-          });
-        } else {
-          originalPreview.src = buffer;
-        }
-      };
-      reader.readAsDataURL(file);
+    async function handleFiles(files) {
+      imagesPreview.innerHTML = '';
+      selectedFiles = Array.from(files).slice(0, 50);
+      for (let file of selectedFiles) {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          const originalSizeKB = (file.size / 1024).toFixed(2);
+          let previewURL = reader.result;
+          if (file.type === 'image/heic') {
+            const blob = await heic2any({ blob: file, toType: 'image/jpeg' });
+            previewURL = URL.createObjectURL(blob);
+          } else if (file.type === 'image/tiff') {
+            const tiff = new Tiff({ buffer: reader.result });
+            const canvas = tiff.toCanvas();
+            previewURL = canvas.toDataURL('image/png');
+          }
+          const container = document.createElement('div');
+          container.className = 'preview-box';
+          container.innerHTML = `
+            <strong>${file.name}</strong>
+            <div>Original size: ${originalSizeKB} KB</div>
+            <img src="${previewURL}" alt="${file.name}" />
+          `;
+          imagesPreview.appendChild(container);
+        };
+        reader.readAsArrayBuffer(file);
+      }
     }
 
-    convertBtn.addEventListener('click', () => {
-      if (!selectedFile) return alert('Please upload an image.');
+    convertBtn.addEventListener('click', async () => {
+      if (selectedFiles.length === 0) return alert('Please upload images.');
 
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
+      const outputFormat = formatSelect.value;
+      const quality = parseFloat(qualityRange.value);
+      const zip = new JSZip();
 
-        const outputFormat = formatSelect.value;
-        const quality = parseFloat(qualityRange.value);
-        canvas.toBlob(blob => {
-          const url = URL.createObjectURL(blob);
-          convertedPreview.src = url;
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const file = selectedFiles[i];
+        const reader = new FileReader();
+        await new Promise((resolve) => {
+          reader.onload = async () => {
+            const img = new Image();
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              canvas.width = img.width;
+              canvas.height = img.height;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0);
+              canvas.toBlob(blob => {
+                zip.file(file.name.replace(/\.[^.]+$/, '') + '.' + outputFormat.split('/')[1], blob);
+                const compressedKB = (blob.size / 1024).toFixed(2);
+                progressText.textContent = `${Math.round(((i + 1) / selectedFiles.length) * 100)}%`;
+                progressBar.style.width = `${((i + 1) / selectedFiles.length) * 100}%`;
+                resolve();
+              }, outputFormat, quality);
+            };
+            img.src = URL.createObjectURL(file);
+          };
+          reader.readAsDataURL(file);
+        });
+      }
 
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = `converted.${outputFormat.split('/')[1]}`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-        }, outputFormat, quality);
-      };
-      img.src = URL.createObjectURL(selectedFile);
+      zip.generateAsync({ type: 'blob' }).then(content => {
+        const zipLink = document.createElement('a');
+        zipLink.href = URL.createObjectURL(content);
+        zipLink.download = 'converted_images.zip';
+        zipLink.click();
+      });
     });
   </script>
 </body>
