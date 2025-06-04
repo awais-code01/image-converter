@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Universal Image Converter</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    .drop-zone {
+      border: 2px dashed #ccc;
+      padding: 30px;
+      text-align: center;
+      cursor: pointer;
+      margin-bottom: 20px;
+      width: 100%;
+      max-width: 500px;
+    }
+    .drop-zone.hover {
+      background-color: #f0f0f0;
+    }
+    img {
+      max-width: 100%;
+      margin-top: 10px;
+    }
+    .controls {
+      margin: 10px 0;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      max-width: 500px;
+    }
+    @media (min-width: 600px) {
+      .controls {
+        flex-direction: row;
+        justify-content: space-between;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h2>Universal Image Converter</h2>
+
+  <div class="drop-zone" id="dropZone">Drop image here or click to upload</div>
+  <input type="file" id="fileInput" accept="image/*" style="display:none" />
+
+  <div class="controls">
+    <label>
+      Convert to:
+      <select id="formatSelect">
+        <option value="image/jpeg">JPG</option>
+        <option value="image/png">PNG</option>
+        <option value="image/webp">WebP</option>
+        <option value="image/bmp">BMP</option>
+        <option value="image/gif">GIF</option>
+        <option value="image/avif">AVIF</option>
+      </select>
+    </label>
+    <label>
+      Quality:
+      <input type="range" id="qualityRange" min="0.1" max="1" step="0.1" value="0.9">
+    </label>
+    <button id="convertBtn">Convert & Download</button>
+  </div>
+
+  <div>
+    <h4>Original Preview:</h4>
+    <img id="originalPreview" />
+    <h4>Converted Preview:</h4>
+    <img id="convertedPreview" />
+  </div>
+
+  <!-- Libraries -->
+  <script src="https://unpkg.com/heic2any"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tiff@latest/dist/tiff.min.js"></script>
+
+  <script>
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const originalPreview = document.getElementById('originalPreview');
+    const convertedPreview = document.getElementById('convertedPreview');
+    const formatSelect = document.getElementById('formatSelect');
+    const qualityRange = document.getElementById('qualityRange');
+    const convertBtn = document.getElementById('convertBtn');
+
+    let selectedFile = null;
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', e => {
+      e.preventDefault();
+      dropZone.classList.add('hover');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('hover'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('hover');
+      handleFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
+
+    function handleFile(file) {
+      selectedFile = file;
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const buffer = reader.result;
+        if (file.type === 'image/heic') {
+          const blob = await heic2any({ blob: file, toType: 'image/jpeg' });
+          selectedFile = new File([blob], file.name.replace(/\.heic$/, '.jpg'), { type: 'image/jpeg' });
+          originalPreview.src = URL.createObjectURL(blob);
+        } else if (file.type === 'image/tiff') {
+          const tiff = new Tiff({ buffer });
+          const canvas = tiff.toCanvas();
+          originalPreview.src = canvas.toDataURL('image/png');
+          canvas.toBlob(blob => {
+            selectedFile = new File([blob], file.name.replace(/\.tiff$/, '.png'), { type: 'image/png' });
+          });
+        } else {
+          originalPreview.src = buffer;
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    convertBtn.addEventListener('click', () => {
+      if (!selectedFile) return alert('Please upload an image.');
+
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+
+        const outputFormat = formatSelect.value;
+        const quality = parseFloat(qualityRange.value);
+        canvas.toBlob(blob => {
+          const url = URL.createObjectURL(blob);
+          convertedPreview.src = url;
+
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `converted.${outputFormat.split('/')[1]}`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }, outputFormat, quality);
+      };
+      img.src = URL.createObjectURL(selectedFile);
+    });
+  </script>
+</body>
+</html>
